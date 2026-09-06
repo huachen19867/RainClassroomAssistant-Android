@@ -2,6 +2,7 @@ package com.zaqizaba.rainassistant.ui
 
 import android.Manifest
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var secureStore: SecureStore
     private var receiverRegistered = false
     private var nodeValidationGeneration = 0
+    private var waitingForWeChatScanReturn = false
 
     private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         refreshAccount()
@@ -85,8 +87,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.loginButton.setOnClickListener {
+            loginLauncher.launch(Intent(this, LoginActivity::class.java))
+        }
+        binding.qrLoginButton.setOnClickListener {
             loginLauncher.launch(Intent(this, QrLoginActivity::class.java))
         }
+        binding.classroomScanButton.setOnClickListener { openWeChatClassroomScanner() }
         binding.startButton.setOnClickListener { startAutomation() }
         binding.stopButton.setOnClickListener {
             startService(Intent(this, ClassroomService::class.java).setAction(ClassroomService.ACTION_STOP))
@@ -138,6 +144,19 @@ class MainActivity : AppCompatActivity() {
         renderStatus(StatusBus.read(this))
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (waitingForWeChatScanReturn) {
+            waitingForWeChatScanReturn = false
+            val message = if (ClassroomService.isEnabled(this)) {
+                "已返回雨课堂助手，后台课堂监听仍在运行"
+            } else {
+                "已返回雨课堂助手；进入小程序课堂后请点击开始工作"
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onStop() {
         if (receiverRegistered) {
             unregisterReceiver(statusReceiver)
@@ -150,7 +169,7 @@ class MainActivity : AppCompatActivity() {
         when {
             secureStore.sessionId.isBlank() -> {
                 StatusBus.publish(this, WorkPhase.NEED_LOGIN, "请先登录雨课堂")
-                loginLauncher.launch(Intent(this, QrLoginActivity::class.java))
+                loginLauncher.launch(Intent(this, LoginActivity::class.java))
             }
             secureStore.effectiveApiKey.isBlank() -> {
                 StatusBus.publish(this, WorkPhase.NEED_API, "请在设置中填写 DeepSeek API Key")
@@ -211,7 +230,7 @@ class MainActivity : AppCompatActivity() {
 
         val sessionId = secureStore.sessionId
         if (sessionId.isBlank()) {
-            val detail = "已切换到${node.displayName}，请先完成扫码登录"
+            val detail = "已切换到${node.displayName}，请先完成 App 内登录"
             StatusBus.publish(this, WorkPhase.NEED_LOGIN, detail)
             renderStatus(StatusBus.read(this))
             Toast.makeText(
@@ -266,7 +285,7 @@ class MainActivity : AppCompatActivity() {
                     refreshAccount()
                 }
                 val detail = if (expired) {
-                    "${node.displayName}登录已失效，请重新扫码"
+                    "${node.displayName}登录已失效，请重新登录"
                 } else {
                     "暂时无法校验${node.displayName}登录状态，已保留本机登录信息：${error.message}"
                 }
@@ -303,7 +322,7 @@ class MainActivity : AppCompatActivity() {
         }
         secureStore.clearLogin(node.key)
         refreshAccount()
-        StatusBus.publish(this, WorkPhase.NEED_LOGIN, "已退出${node.displayName}账号，请重新扫码登录")
+        StatusBus.publish(this, WorkPhase.NEED_LOGIN, "已退出${node.displayName}账号，请重新登录")
         renderStatus(StatusBus.read(this))
         Toast.makeText(this, "已清除${node.displayName}登录状态", Toast.LENGTH_SHORT).show()
     }
@@ -356,12 +375,61 @@ class MainActivity : AppCompatActivity() {
         val sessionId = secureStore.sessionId
         val node = secureStore.currentNode
         binding.nodeText.text = "节点：${node.displayName}（${node.host}）"
-        binding.loginButton.text = if (sessionId.isBlank()) "限时扫码登录" else "重新扫码登录"
+        binding.loginButton.text = if (sessionId.isBlank()) "App 内直接登录" else "重新登录当前节点"
         binding.logoutButton.isEnabled = sessionId.isNotBlank()
         binding.accountText.text = if (sessionId.isBlank()) {
             "账号：未登录"
         } else {
             "账号：${secureStore.userName.ifBlank { "已保存登录态" }}"
+        }
+    }
+
+    private fun openWeChatClassroomScanner() {
+        if (secureStore.sessionId.isBlank()) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("请先登录雨课堂")
+                .setMessage("课堂码需要由微信完成扫码，但雨课堂助手仍需当前节点登录状态才能继续监听课堂。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("App 内登录") { _, _ ->
+                    loginLauncher.launch(Intent(this, LoginActivity::class.java))
+                }
+                .show()
+            return
+        }
+
+        val scannerIntent = Intent(Intent.ACTION_MAIN).apply {
+            component = ComponentName(WECHAT_PACKAGE, WECHAT_LAUNCHER_ACTIVITY)
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            putExtra(WECHAT_SCANNER_SHORTCUT_EXTRA, true)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val scannerResult = runCatching {
+            waitingForWeChatScanReturn = true
+            startActivity(scannerIntent)
+        }
+        if (scannerResult.isSuccess) {
+            Toast.makeText(
+                this,
+                "请扫描老师展示的课堂码；若未直接进入扫一扫，请点微信右上角 +",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+
+        waitingForWeChatScanReturn = false
+        val fallbackIntent = packageManager.getLaunchIntentForPackage(WECHAT_PACKAGE)
+        if (fallbackIntent == null) {
+            Toast.makeText(this, "未检测到微信，请先安装或启用微信", Toast.LENGTH_LONG).show()
+            return
+        }
+        runCatching {
+            waitingForWeChatScanReturn = true
+            startActivity(fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        }.onSuccess {
+            Toast.makeText(this, "微信未开放快捷扫码入口，请点右上角 + → 扫一扫", Toast.LENGTH_LONG).show()
+        }.onFailure { error ->
+            waitingForWeChatScanReturn = false
+            Toast.makeText(this, "无法打开微信：${error.message ?: "系统拒绝启动"}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -434,6 +502,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val WECHAT_PACKAGE = "com.tencent.mm"
+        private const val WECHAT_LAUNCHER_ACTIVITY = "com.tencent.mm.ui.LauncherUI"
+        private const val WECHAT_SCANNER_SHORTCUT_EXTRA = "LauncherUI.From.Scaner.Shortcut"
         private val TIME_FORMAT = SimpleDateFormat("HH:mm:ss", Locale.CHINA)
     }
 }
