@@ -41,4 +41,4 @@ DEEPSEEK_API_KEY=
 
 ## 来源与许可
 
-本项目基于 [blade-god-is-so-cool/RainClassroomAssistant](https://gitee.com/blade-god-is-so-cool/RainClassroomAssistant) 的课堂协议实现重新制作 Android 客户端。原项目与本仓库均按 [GNU General Public License v3.0](./LICENSE) 发布。
+本项目借鉴了刃神的“[RainClassroomAssistant](https://gitee.com/blade-god-is-so-cool/RainClassroomAssistant)”相关代码，在此基础上精简而成 Android 新版本。原项目与本仓库均按 [GNU General Public License v3.0](./LICENSE) 发布。
