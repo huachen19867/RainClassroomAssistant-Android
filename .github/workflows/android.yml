@@ -1,0 +1,38 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject committed API keys
+        shell: bash
+        run: |
+          if grep -R -E 'sk-[A-Za-z0-9]{20,}' . \
+            --exclude-dir=.git \
+            --exclude-dir=build \
+            --exclude-dir=.gradle; then
+            echo "A probable API key was found in public sources."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Verify and build public APK
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest lintDebug assembleDebug

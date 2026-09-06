@@ -1,0 +1,2 @@
+# Copy this file to local-brand.properties to customize a private APK label.
+DEEPSEEK_API_LABEL=内置测试 API Key

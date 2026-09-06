@@ -1,0 +1,20 @@
+# Android and Gradle local state
+.gradle/
+.kotlin/
+.idea/
+.tools/
+local.properties
+local-secrets.properties
+local-brand.properties
+app/build/
+build/
+artifacts/
+*.apk
+*.aab
+
+# Editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db
+*.iml
+*.log

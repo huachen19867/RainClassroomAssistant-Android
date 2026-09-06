@@ -1,0 +1,7 @@
+<resources>
+    <color name="brand_blue">#3478F6</color>
+    <color name="surface">#F5F7FB</color>
+    <color name="success">#168A4B</color>
+    <color name="text_primary">#1D2733</color>
+    <color name="text_secondary">#66717F</color>
+</resources>

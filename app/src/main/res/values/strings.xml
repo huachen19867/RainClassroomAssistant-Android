@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">雨课堂助手 Lite</string>
+    <string name="nav_home">工作台</string>
+    <string name="nav_settings">设置</string>
+    <string name="login_success">登录成功：%1$s</string>
+</resources>
