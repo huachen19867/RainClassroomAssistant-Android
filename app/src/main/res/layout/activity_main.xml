@@ -29,7 +29,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="雨课堂助手 Lite"
+                    android:text="雨课堂助手 Lite V2"
                     android:textColor="@color/text_primary"
                     android:textSize="26sp"
                     android:textStyle="bold" />
@@ -38,7 +38,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="仅连接雨课堂主站 · 自动签到与答题"
+                    android:text="多节点 · 限时扫码登录 · 自动签到与答题"
                     android:textColor="@color/text_secondary"
                     android:textSize="14sp" />
 
@@ -111,6 +111,15 @@
                             android:textSize="14sp" />
 
                         <TextView
+                            android:id="@+id/nodeText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="节点：雨课堂（主站）"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp" />
+
+                        <TextView
                             android:id="@+id/answerCapabilityText"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -127,7 +136,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="56dp"
                     android:layout_marginTop="18dp"
-                    android:text="在 App 内登录雨课堂"
+                    android:text="限时扫码登录"
                     app:cornerRadius="14dp" />
 
                 <LinearLayout
@@ -217,7 +226,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="答题服务和后台运行设置"
+                    android:text="节点、答题延迟和后台运行设置"
                     android:textColor="@color/text_secondary"
                     android:textSize="14sp" />
 
@@ -225,6 +234,80 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="24dp"
+                    app:cardCornerRadius="18dp"
+                    app:cardElevation="0dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="雨课堂与答题"
+                            android:textColor="@color/text_primary"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="雨课堂节点"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <Spinner
+                            android:id="@+id/nodeSpinner"
+                            android:layout_width="match_parent"
+                            android:layout_height="52dp"
+                            android:layout_marginTop="4dp"
+                            android:backgroundTint="@color/brand_blue"
+                            android:contentDescription="选择雨课堂节点"
+                            android:spinnerMode="dropdown" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="每个节点单独保存登录状态；切换节点会停止正在运行的后台服务。"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp"
+                            android:hint="自动答题延迟（秒）"
+                            app:helperText="范围 0–60 秒，默认 3 秒">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/answerDelayInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:digits="0123456789"
+                                android:inputType="number"
+                                android:maxLength="2"
+                                android:maxLines="1"
+                                android:text="3" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/saveAnswerDelayButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="保存答题延迟" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
                     app:cardCornerRadius="18dp"
                     app:cardElevation="0dp">
 

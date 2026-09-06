@@ -1,6 +1,5 @@
 package com.zaqizaba.rainassistant.network
 
-import com.zaqizaba.rainassistant.BuildConfig
 import com.zaqizaba.rainassistant.model.ActiveLesson
 import com.zaqizaba.rainassistant.model.CheckInResult
 import com.zaqizaba.rainassistant.model.Question
@@ -13,8 +12,12 @@ import org.json.JSONObject
 
 class RainClassroomApi(
     val sessionId: String,
+    baseUrl: String,
 ) {
-    private val baseUrl = BuildConfig.YUKETANG_BASE_URL.trimEnd('/')
+    val baseUrl = baseUrl.trimEnd('/')
+    val webSocketUrl = baseUrl
+        .replaceFirst("https://", "wss://")
+        .replaceFirst("http://", "ws://") + "/wsapp/"
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     fun validateSession(): UserInfo {

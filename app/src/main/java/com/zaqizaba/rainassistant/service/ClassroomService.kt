@@ -69,6 +69,8 @@ class ClassroomService : Service() {
 
         val sessionId = secureStore.sessionId
         val apiKey = secureStore.effectiveApiKey
+        val node = secureStore.currentNode
+        val answerDelaySeconds = secureStore.answerDelaySeconds
         when {
             sessionId.isBlank() -> {
                 updateStatus(WorkPhase.NEED_LOGIN, "请先在 App 内登录雨课堂")
@@ -87,7 +89,7 @@ class ClassroomService : Service() {
         controlPreferences().edit().putBoolean(KEY_ENABLED, true).apply()
         acquireWakeLock()
         monitorJob = scope.launch {
-            val rainApi = RainClassroomApi(sessionId)
+            val rainApi = RainClassroomApi(sessionId, node.baseUrl)
             val deepSeek = DeepSeekClient(apiKey)
             var userInfo: com.zaqizaba.rainassistant.model.UserInfo? = null
             try {
@@ -98,11 +100,14 @@ class ClassroomService : Service() {
                             deepSeek.testConnection()
                             userInfo = validatedUser
                             secureStore.userName = validatedUser.name
-                            updateStatus(WorkPhase.READY, "登录与答题模型已就绪，可以自动处理题目")
+                            updateStatus(
+                                WorkPhase.READY,
+                                "${node.displayName}登录与答题模型已就绪，答题延迟 ${answerDelaySeconds} 秒",
+                            )
                         }
 
                         if (workers.isEmpty()) {
-                            updateStatus(WorkPhase.MONITORING, "正在等待雨课堂主站的课程和题目")
+                            updateStatus(WorkPhase.MONITORING, "正在等待${node.displayName}的课程和题目")
                         } else {
                             updateStatus(WorkPhase.COURSE_FOUND, "正在监听 ${workers.size} 门课程，可以自动处理题目")
                         }
@@ -116,6 +121,7 @@ class ClassroomService : Service() {
                                     userInfo = requireNotNull(userInfo),
                                     rainApi = rainApi,
                                     deepSeekClient = deepSeek,
+                                    answerDelaySeconds = answerDelaySeconds,
                                     scope = scope,
                                     report = ::updateStatus,
                                     onFinished = workers::remove,
@@ -127,7 +133,7 @@ class ClassroomService : Service() {
                         }
                         delay(POLL_INTERVAL_MS)
                     } catch (expired: SessionExpiredException) {
-                        secureStore.clearLogin()
+                        secureStore.clearLogin(node.key)
                         controlPreferences().edit().putBoolean(KEY_ENABLED, false).apply()
                         updateStatus(WorkPhase.SESSION_EXPIRED, expired.message ?: "登录已失效")
                         break

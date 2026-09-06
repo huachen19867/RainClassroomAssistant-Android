@@ -13,10 +13,10 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.zaqizaba.rainassistant.BuildConfig
 import com.zaqizaba.rainassistant.R
 import com.zaqizaba.rainassistant.data.SecureStore
 import com.zaqizaba.rainassistant.databinding.ActivityLoginBinding
+import com.zaqizaba.rainassistant.model.RainNode
 import com.zaqizaba.rainassistant.network.RainClassroomApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 class LoginActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLoginBinding
     private lateinit var secureStore: SecureStore
+    private lateinit var node: RainNode
     private var validating = false
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -33,6 +34,8 @@ class LoginActivity : AppCompatActivity() {
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
         secureStore = SecureStore(this)
+        node = secureStore.currentNode
+        binding.loginStatusText.text = "请完成${node.displayName}登录授权"
 
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
@@ -41,7 +44,7 @@ class LoginActivity : AppCompatActivity() {
         binding.loginWebView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            userAgentString = userAgentString + " RainAssistant/0.1 Android"
+            userAgentString = userAgentString + " RainAssistant/2.0 Android"
         }
         binding.loginWebView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -69,7 +72,7 @@ class LoginActivity : AppCompatActivity() {
 
         binding.closeLoginButton.setOnClickListener { finish() }
         binding.checkLoginButton.setOnClickListener { captureAndValidateCookie(silent = false) }
-        binding.loginWebView.loadUrl(LOGIN_URL)
+        binding.loginWebView.loadUrl("${node.baseUrl}/web")
     }
 
     override fun onResume() {
@@ -86,7 +89,7 @@ class LoginActivity : AppCompatActivity() {
     private fun captureAndValidateCookie(silent: Boolean) {
         if (validating) return
         CookieManager.getInstance().flush()
-        val rawCookies = CookieManager.getInstance().getCookie(BuildConfig.YUKETANG_BASE_URL).orEmpty()
+        val rawCookies = CookieManager.getInstance().getCookie(node.baseUrl).orEmpty()
         val sessionId = rawCookies.split(';')
             .map(String::trim)
             .firstOrNull { it.startsWith("sessionid=") }
@@ -102,7 +105,7 @@ class LoginActivity : AppCompatActivity() {
         binding.loginStatusText.text = "正在校验登录状态"
         lifecycleScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { RainClassroomApi(sessionId).validateSession() }
+                withContext(Dispatchers.IO) { RainClassroomApi(sessionId, node.baseUrl).validateSession() }
             }
             validating = false
             binding.checkLoginButton.isEnabled = true
@@ -118,7 +121,4 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    companion object {
-        private val LOGIN_URL = "${BuildConfig.YUKETANG_BASE_URL}/web"
-    }
 }

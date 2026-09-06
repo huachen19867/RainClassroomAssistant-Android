@@ -46,6 +46,7 @@ enum class WorkPhase(
     MONITORING("正在监听", true),
     COURSE_FOUND("检测到课程", true),
     CHECKING_IN("正在签到", true),
+    WAITING_TO_SOLVE("答题等待中", true),
     SOLVING("正在解题", true),
     ANSWERED("已完成答题", true),
     NETWORK_ERROR("网络异常", false),

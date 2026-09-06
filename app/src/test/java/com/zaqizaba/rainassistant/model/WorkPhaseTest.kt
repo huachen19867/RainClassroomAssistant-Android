@@ -12,7 +12,7 @@ class WorkPhaseTest {
         assertFalse(WorkPhase.NETWORK_ERROR.canAnswer)
         assertTrue(WorkPhase.READY.canAnswer)
         assertTrue(WorkPhase.MONITORING.canAnswer)
+        assertTrue(WorkPhase.WAITING_TO_SOLVE.canAnswer)
         assertTrue(WorkPhase.SOLVING.canAnswer)
     }
 }
-

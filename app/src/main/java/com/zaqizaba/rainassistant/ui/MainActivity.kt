@@ -12,6 +12,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -21,10 +23,11 @@ import com.zaqizaba.rainassistant.BuildConfig
 import com.zaqizaba.rainassistant.R
 import com.zaqizaba.rainassistant.data.SecureStore
 import com.zaqizaba.rainassistant.databinding.ActivityMainBinding
+import com.zaqizaba.rainassistant.model.AnswerDelay
+import com.zaqizaba.rainassistant.model.RainNodes
 import com.zaqizaba.rainassistant.model.WorkPhase
 import com.zaqizaba.rainassistant.model.WorkStatus
 import com.zaqizaba.rainassistant.network.DeepSeekClient
-import com.zaqizaba.rainassistant.network.RainClassroomApi
 import com.zaqizaba.rainassistant.service.ClassroomService
 import com.zaqizaba.rainassistant.service.StatusBus
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +46,12 @@ class MainActivity : AppCompatActivity() {
         refreshAccount()
         if (it.resultCode == RESULT_OK) {
             Toast.makeText(this, "雨课堂登录成功", Toast.LENGTH_SHORT).show()
-            StatusBus.publish(this, WorkPhase.READY, "登录成功，点击开始工作")
+            val needsApi = secureStore.effectiveApiKey.isBlank()
+            StatusBus.publish(
+                this,
+                if (needsApi) WorkPhase.NEED_API else WorkPhase.READY,
+                if (needsApi) "登录成功，请在设置中填写 DeepSeek API Key" else "登录成功，点击开始工作",
+            )
         }
     }
 
@@ -72,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.loginButton.setOnClickListener {
-            loginLauncher.launch(Intent(this, LoginActivity::class.java))
+            loginLauncher.launch(Intent(this, QrLoginActivity::class.java))
         }
         binding.startButton.setOnClickListener { startAutomation() }
         binding.stopButton.setOnClickListener {
@@ -92,6 +100,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
         binding.testApiButton.setOnClickListener { testApiKey() }
+        binding.saveAnswerDelayButton.setOnClickListener { saveAnswerDelay() }
         binding.batterySettingsButton.setOnClickListener {
             runCatching {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
@@ -101,6 +110,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         requestNotificationPermission()
+        setupNodeSettings()
+        binding.answerDelayInput.setText(secureStore.answerDelaySeconds.toString())
         refreshAccount()
         refreshApiKeyState()
         renderStatus(StatusBus.read(this))
@@ -133,7 +144,7 @@ class MainActivity : AppCompatActivity() {
         when {
             secureStore.sessionId.isBlank() -> {
                 StatusBus.publish(this, WorkPhase.NEED_LOGIN, "请先登录雨课堂")
-                loginLauncher.launch(Intent(this, LoginActivity::class.java))
+                loginLauncher.launch(Intent(this, QrLoginActivity::class.java))
             }
             secureStore.effectiveApiKey.isBlank() -> {
                 StatusBus.publish(this, WorkPhase.NEED_API, "请在设置中填写 DeepSeek API Key")
@@ -157,6 +168,80 @@ class MainActivity : AppCompatActivity() {
         refreshApiKeyState()
         renderStatus(StatusBus.read(this))
         Toast.makeText(this, "用户 API Key 已加密保存", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun setupNodeSettings() {
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            RainNodes.all.map { it.displayName },
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.nodeSpinner.adapter = adapter
+        binding.nodeSpinner.setSelection(
+            RainNodes.all.indexOfFirst { it.key == secureStore.selectedNodeKey }.coerceAtLeast(0),
+            false,
+        )
+        binding.nodeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = RainNodes.all.getOrNull(position) ?: return
+                if (selected.key == secureStore.selectedNodeKey) return
+                val wasRunning = ClassroomService.isEnabled(this@MainActivity)
+                if (wasRunning) {
+                    startService(
+                        Intent(this@MainActivity, ClassroomService::class.java)
+                            .setAction(ClassroomService.ACTION_STOP),
+                    )
+                }
+                secureStore.selectedNodeKey = selected.key
+                refreshAccount()
+                val detail = when {
+                    secureStore.sessionId.isBlank() -> "已切换到${selected.displayName}，请先完成扫码登录"
+                    secureStore.effectiveApiKey.isBlank() -> "已切换到${selected.displayName}，请配置 DeepSeek API Key"
+                    else -> "已切换到${selected.displayName}，登录态已就绪"
+                }
+                val phase = when {
+                    secureStore.sessionId.isBlank() -> WorkPhase.NEED_LOGIN
+                    secureStore.effectiveApiKey.isBlank() -> WorkPhase.NEED_API
+                    else -> WorkPhase.READY
+                }
+                StatusBus.publish(
+                    this@MainActivity,
+                    phase,
+                    detail,
+                )
+                renderStatus(StatusBus.read(this@MainActivity))
+                Toast.makeText(
+                    this@MainActivity,
+                    if (wasRunning) "$detail；后台服务已停止" else detail,
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun saveAnswerDelay() {
+        val raw = binding.answerDelayInput.text?.toString()?.trim().orEmpty()
+        val parsed = raw.toIntOrNull()
+        if (parsed == null) {
+            Toast.makeText(this, "请输入 0 到 60 的整数秒数", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val normalized = AnswerDelay.normalize(parsed)
+        secureStore.answerDelaySeconds = normalized
+        binding.answerDelayInput.setText(normalized.toString())
+        val wasRunning = ClassroomService.isEnabled(this)
+        if (wasRunning) {
+            startService(Intent(this, ClassroomService::class.java).setAction(ClassroomService.ACTION_STOP))
+        }
+        Toast.makeText(
+            this,
+            if (wasRunning) "答题延迟已设为 ${normalized} 秒；请重新开始工作使其生效" else "答题延迟已设为 ${normalized} 秒",
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     private fun testApiKey() {
@@ -184,7 +269,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshAccount() {
         val sessionId = secureStore.sessionId
-        binding.loginButton.text = if (sessionId.isBlank()) "在 App 内登录雨课堂" else "重新登录雨课堂"
+        val node = secureStore.currentNode
+        binding.nodeText.text = "节点：${node.displayName}（${node.host}）"
+        binding.loginButton.text = if (sessionId.isBlank()) "限时扫码登录" else "重新扫码登录"
         binding.accountText.text = if (sessionId.isBlank()) {
             "账号：未登录"
         } else {
@@ -219,6 +306,7 @@ class MainActivity : AppCompatActivity() {
                 WorkPhase.MONITORING,
                 WorkPhase.COURSE_FOUND,
                 WorkPhase.CHECKING_IN,
+                WorkPhase.WAITING_TO_SOLVE,
                 WorkPhase.SOLVING,
                 WorkPhase.ANSWERED,
                 -> ContextCompat.getColor(this, R.color.success)

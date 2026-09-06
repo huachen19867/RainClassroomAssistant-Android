@@ -19,6 +19,20 @@ val localBrand = Properties().apply {
     }
 }
 
+val defaultDeepSeekApiKey = System.getenv("RAIN_ASSISTANT_DEEPSEEK_API_KEY")
+    .orEmpty()
+    .trim()
+    .ifBlank { localSecrets.getProperty("DEEPSEEK_API_KEY", "").trim() }
+
+val defaultDeepSeekApiLabel = System.getenv("RAIN_ASSISTANT_DEEPSEEK_API_LABEL")
+    .orEmpty()
+    .trim()
+    .ifBlank {
+        localBrand.getProperty("DEEPSEEK_API_LABEL", "内置测试 API Key")
+            .trim()
+            .ifBlank { "内置测试 API Key" }
+    }
+
 fun quotedBuildConfig(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
@@ -30,26 +44,21 @@ android {
         applicationId = "com.zaqizaba.rainassistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "2.0.0"
 
         buildConfigField(
             "String",
             "DEFAULT_DEEPSEEK_API_KEY",
-            quotedBuildConfig(localSecrets.getProperty("DEEPSEEK_API_KEY", "").trim()),
+            quotedBuildConfig(defaultDeepSeekApiKey),
         )
         buildConfigField(
             "String",
             "DEFAULT_DEEPSEEK_API_LABEL",
-            quotedBuildConfig(
-                localBrand.getProperty("DEEPSEEK_API_LABEL", "内置测试 API Key")
-                    .trim()
-                    .ifBlank { "内置测试 API Key" },
-            ),
+            quotedBuildConfig(defaultDeepSeekApiLabel),
         )
         buildConfigField("String", "DEEPSEEK_BASE_URL", quotedBuildConfig("https://api.deepseek.com"))
         buildConfigField("String", "DEEPSEEK_MODEL", quotedBuildConfig("deepseek-v4-flash-vision-exp"))
-        buildConfigField("String", "YUKETANG_BASE_URL", quotedBuildConfig("https://www.yuketang.cn"))
     }
 
     buildFeatures {

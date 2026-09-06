@@ -1,6 +1,5 @@
 package com.zaqizaba.rainassistant.service
 
-import com.zaqizaba.rainassistant.BuildConfig
 import com.zaqizaba.rainassistant.model.ActiveLesson
 import com.zaqizaba.rainassistant.model.Question
 import com.zaqizaba.rainassistant.model.UserInfo
@@ -11,6 +10,7 @@ import com.zaqizaba.rainassistant.network.RainClassroomApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.Request
 import okhttp3.Response
@@ -26,6 +26,7 @@ class LessonWorker(
     private val userInfo: UserInfo,
     private val rainApi: RainClassroomApi,
     private val deepSeekClient: DeepSeekClient,
+    private val answerDelaySeconds: Int,
     private val scope: CoroutineScope,
     private val report: (WorkPhase, String) -> Unit,
     private val onFinished: (String) -> Unit,
@@ -64,7 +65,7 @@ class LessonWorker(
             identityId = checkIn.identityId
 
             val request = Request.Builder()
-                .url(BuildConfig.YUKETANG_BASE_URL.replace("https://", "wss://") + "/wsapp/")
+                .url(rainApi.webSocketUrl)
                 .header("Cookie", "sessionid=${rainApi.sessionId}")
                 .header("Authorization", "Bearer $authorization")
                 .build()
@@ -166,6 +167,13 @@ class LessonWorker(
         if (problemId in answered || !solving.add(problemId)) return
         scope.launch(Dispatchers.IO) {
             try {
+                if (answerDelaySeconds > 0) {
+                    report(
+                        WorkPhase.WAITING_TO_SOLVE,
+                        "${lesson.courseName} 收到题目，${answerDelaySeconds} 秒后开始解题：$problemId",
+                    )
+                    delay(answerDelaySeconds * 1_000L)
+                }
                 var question = questions[problemId]
                 if (question == null) {
                     presentations.toList().forEach { presentationId ->
@@ -201,7 +209,7 @@ class LessonWorker(
         reconnectJob = scope.launch(Dispatchers.IO) {
             val delaySeconds = minOf(30, 5 shl minOf(reconnectAttempt, 2))
             reconnectAttempt += 1
-            kotlinx.coroutines.delay(delaySeconds * 1_000L)
+            delay(delaySeconds * 1_000L)
             connect()
         }
     }
