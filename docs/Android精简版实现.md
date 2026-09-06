@@ -8,11 +8,11 @@ Android 工程包名为 `com.zaqizaba.rainassistant`，最低支持 Android 8.0�
 
 ## 登录链路
 
-`QrLoginActivity` 复用原版 `/wsapp/` 的 `requestlogin`/`loginsuccess` 协议：先取得并显示 ticket 二维码，60 秒自动请求新二维码，总流程 240 秒超时；扫码成功后将 `UserID` 与 `Auth` POST 到当前节点 `/pc/web_login`，从 `Set-Cookie` 解析 `sessionid`，再调用 `/api/v3/user/basic-info` 校验，只有校验成功才加密保存。
+`QrLoginActivity` 复用原版 `/wsapp/` 的 `requestlogin`/`loginsuccess` 协议：先取得并显示 ticket 二维码，总流程 240 秒超时；每张二维码 60 秒到期后关闭旧连接并建立新的登录 WebSocket，避免旧连接存在但不再响应。ticket 同时兼容顶层字段和 `data.ticket`，只接受完整 HTTP(S) 地址或当前节点根相对地址。扫码成功后将 `UserID` 与 `Auth` POST 到当前节点 `/pc/web_login`，从 `Set-Cookie` 解析 `sessionid`，再调用 `/api/v3/user/basic-info` 校验，只有校验成功才加密保存。
 
 `LoginActivity` 保留为备用登录方式，在 App 内加载当前节点官方 `/web` 页面，并读取同域 Cookie。扫码页销毁、重试、超时或跳到备用登录时都会停止 WebSocket、倒计时和刷新任务。二维码显示在本手机上时需要另一台设备扫码。
 
-登录 session 与用户名按节点分别存储。V1 升级后的旧单节点 session 仅迁移兼容到主站；切换节点会停止后台服务，但不会删除其他节点登录状态。
+登录 session 与用户名按节点分别存储。V1 升级后的旧单节点 session 仅迁移兼容到主站；切换节点会停止后台服务，并立即校验目标节点已保存的 session。明确失效时只清除目标节点数据；暂时网络失败时保留本机 session。设置页的退出按钮同样只清除当前节点，不影响其他节点。
 
 ## 自动化链路
 
@@ -24,7 +24,7 @@ Android 工程包名为 `com.zaqizaba.rainassistant`，最低支持 Android 8.0�
 
 ## 状态设计
 
-服务通过应用内显式广播和普通状态 SharedPreferences 发布运行态。敏感值不进入状态存储。当前状态包括：未启动、需要登录、需要 API、已就绪、正在监听、检测到课程、正在签到、答题等待中、正在解题、已完成答题、网络异常和登录失效。
+服务通过应用内显式广播和普通状态 SharedPreferences 发布运行态。敏感值不进入状态存储。当前状态包括：未启动、需要登录、需要 API、正在校验登录、已就绪、正在监听、检测到课程、正在签到、答题等待中、正在解题、已完成答题、网络异常和登录失效。
 
 首页单独显示“自动答题：可以/暂不可用/当前不可用”。“可以”不是单纯根据按钮或 API 配置判断：只有前台服务确实已启用，且 session、模型校验和服务链路达到允许答题的阶段后才进入绿色状态；错误详情同时显示在页面和前台通知中。
 

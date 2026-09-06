@@ -42,6 +42,7 @@ enum class WorkPhase(
     STOPPED("未启动", false),
     NEED_LOGIN("需要登录", false),
     NEED_API("需要 API Key", false),
+    VALIDATING_LOGIN("正在校验登录", false),
     READY("已就绪", true),
     MONITORING("正在监听", true),
     COURSE_FOUND("检测到课程", true),

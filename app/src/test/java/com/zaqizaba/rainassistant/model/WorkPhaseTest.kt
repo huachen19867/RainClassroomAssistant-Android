@@ -9,6 +9,7 @@ class WorkPhaseTest {
     fun readinessMatchesVisibleStateContract() {
         assertFalse(WorkPhase.NEED_LOGIN.canAnswer)
         assertFalse(WorkPhase.NEED_API.canAnswer)
+        assertFalse(WorkPhase.VALIDATING_LOGIN.canAnswer)
         assertFalse(WorkPhase.NETWORK_ERROR.canAnswer)
         assertTrue(WorkPhase.READY.canAnswer)
         assertTrue(WorkPhase.MONITORING.canAnswer)

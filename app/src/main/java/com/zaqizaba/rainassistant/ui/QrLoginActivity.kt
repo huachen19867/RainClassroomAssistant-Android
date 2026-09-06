@@ -10,6 +10,7 @@ import com.zaqizaba.rainassistant.data.SecureStore
 import com.zaqizaba.rainassistant.databinding.ActivityQrLoginBinding
 import com.zaqizaba.rainassistant.model.RainNode
 import com.zaqizaba.rainassistant.network.HttpSupport
+import com.zaqizaba.rainassistant.network.QrTicketUrl
 import com.zaqizaba.rainassistant.network.RainClassroomApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +36,7 @@ class QrLoginActivity : AppCompatActivity() {
     private var refreshJob: Job? = null
     private var generation = 0
     private var deadlineMs = 0L
+    private var qrRefreshDeadlineMs = 0L
     private var exchanging = false
 
     private val webLoginLauncher = registerForActivityResult(
@@ -70,17 +72,22 @@ class QrLoginActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun startQrLogin(resetDeadline: Boolean) {
+    private fun startQrLogin(resetDeadline: Boolean, refreshing: Boolean = false) {
         stopQrLogin()
         generation += 1
         exchanging = false
         binding.qrImage.setImageDrawable(null)
         binding.qrProgress.visibility = View.VISIBLE
-        binding.qrStatusText.text = "正在连接${node.displayName}"
+        binding.qrStatusText.text = if (refreshing) {
+            "二维码已到期，正在建立新的登录连接"
+        } else {
+            "正在连接${node.displayName}"
+        }
         binding.refreshQrButton.isEnabled = false
         if (resetDeadline || deadlineMs == 0L) {
             deadlineMs = System.currentTimeMillis() + LOGIN_TIMEOUT_SECONDS * 1_000L
         }
+        qrRefreshDeadlineMs = System.currentTimeMillis() + QR_REFRESH_SECONDS * 1_000L
         val activeGeneration = generation
         startCountdown(activeGeneration)
 
@@ -91,7 +98,10 @@ class QrLoginActivity : AppCompatActivity() {
         socket = HttpSupport.client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (activeGeneration != generation) return
-                sendLoginRequest(webSocket)
+                if (!sendLoginRequest(webSocket)) {
+                    showFailure(activeGeneration, "二维码请求发送失败，请重试")
+                    return
+                }
                 runOnUiThread {
                     if (activeGeneration == generation && !isFinishing) {
                         binding.qrStatusText.text = "连接成功，正在获取二维码"
@@ -103,9 +113,18 @@ class QrLoginActivity : AppCompatActivity() {
                 if (activeGeneration != generation) return
                 val data = runCatching { JSONObject(text) }.getOrNull() ?: return
                 when (data.optString("op")) {
-                    "requestlogin" -> data.optString("ticket")
-                        .takeIf(String::isNotBlank)
-                        ?.let { downloadQr(activeGeneration, it) }
+                    "requestlogin" -> {
+                        val ticketUrl = QrTicketUrl.resolve(
+                            topLevelTicket = data.optString("ticket"),
+                            nestedTicket = data.optJSONObject("data")?.optString("ticket"),
+                            baseUrl = node.baseUrl,
+                        )
+                        if (ticketUrl == null) {
+                            showFailure(activeGeneration, "服务器未返回有效二维码地址，正在等待自动重连")
+                        } else {
+                            downloadQr(activeGeneration, ticketUrl)
+                        }
+                    }
 
                     "loginsuccess" -> {
                         val userId = data.opt("UserID")?.toString().orEmpty()
@@ -134,8 +153,8 @@ class QrLoginActivity : AppCompatActivity() {
             while (isActive && activeGeneration == generation) {
                 delay(QR_REFRESH_SECONDS * 1_000L)
                 if (!exchanging && System.currentTimeMillis() < deadlineMs) {
-                    socket?.let(::sendLoginRequest)
-                    binding.qrStatusText.text = "二维码已自动刷新，请重新扫码"
+                    startQrLogin(resetDeadline = false, refreshing = true)
+                    return@launch
                 }
             }
         }
@@ -146,7 +165,10 @@ class QrLoginActivity : AppCompatActivity() {
             while (isActive && activeGeneration == generation) {
                 val secondsLeft = ((deadlineMs - System.currentTimeMillis() + 999L) / 1_000L)
                     .coerceAtLeast(0L)
-                binding.qrCountdownText.text = "本次扫码剩余 ${secondsLeft} 秒"
+                val qrSecondsLeft = ((qrRefreshDeadlineMs - System.currentTimeMillis() + 999L) / 1_000L)
+                    .coerceIn(0L, QR_REFRESH_SECONDS)
+                binding.qrCountdownText.text =
+                    "总流程剩余 ${secondsLeft} 秒 · 当前二维码 ${qrSecondsLeft} 秒后刷新"
                 if (secondsLeft == 0L) {
                     generation += 1
                     refreshJob?.cancel()
@@ -162,16 +184,11 @@ class QrLoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun downloadQr(activeGeneration: Int, ticket: String) {
+    private fun downloadQr(activeGeneration: Int, ticketUrl: String) {
         lifecycleScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    val url = if (ticket.startsWith("http://") || ticket.startsWith("https://")) {
-                        ticket
-                    } else {
-                        node.baseUrl + "/" + ticket.trimStart('/')
-                    }
-                    HttpSupport.client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+                    HttpSupport.client.newCall(Request.Builder().url(ticketUrl).get().build()).execute().use { response ->
                         if (!response.isSuccessful) error("HTTP ${response.code}")
                         val bytes = response.body?.bytes() ?: error("二维码内容为空")
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -181,6 +198,7 @@ class QrLoginActivity : AppCompatActivity() {
             }
             if (activeGeneration != generation || isFinishing) return@launch
             result.onSuccess { bitmap ->
+                qrRefreshDeadlineMs = System.currentTimeMillis() + QR_REFRESH_SECONDS * 1_000L
                 binding.qrImage.setImageBitmap(bitmap)
                 binding.qrProgress.visibility = View.GONE
                 binding.qrStatusText.text = "请使用微信扫码授权"
@@ -260,14 +278,14 @@ class QrLoginActivity : AppCompatActivity() {
         socket = null
     }
 
-    private fun sendLoginRequest(webSocket: WebSocket) {
+    private fun sendLoginRequest(webSocket: WebSocket): Boolean {
         val payload = JSONObject()
             .put("op", "requestlogin")
             .put("role", "web")
             .put("version", 1.4)
             .put("type", "qrcode")
             .put("from", "web")
-        webSocket.send(payload.toString())
+        return webSocket.send(payload.toString())
     }
 
     companion object {

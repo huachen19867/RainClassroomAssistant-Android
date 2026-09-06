@@ -19,15 +19,19 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.zaqizaba.rainassistant.BuildConfig
 import com.zaqizaba.rainassistant.R
 import com.zaqizaba.rainassistant.data.SecureStore
 import com.zaqizaba.rainassistant.databinding.ActivityMainBinding
 import com.zaqizaba.rainassistant.model.AnswerDelay
+import com.zaqizaba.rainassistant.model.RainNode
 import com.zaqizaba.rainassistant.model.RainNodes
 import com.zaqizaba.rainassistant.model.WorkPhase
 import com.zaqizaba.rainassistant.model.WorkStatus
 import com.zaqizaba.rainassistant.network.DeepSeekClient
+import com.zaqizaba.rainassistant.network.RainClassroomApi
+import com.zaqizaba.rainassistant.network.SessionExpiredException
 import com.zaqizaba.rainassistant.service.ClassroomService
 import com.zaqizaba.rainassistant.service.StatusBus
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var secureStore: SecureStore
     private var receiverRegistered = false
+    private var nodeValidationGeneration = 0
 
     private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         refreshAccount()
@@ -101,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.testApiButton.setOnClickListener { testApiKey() }
         binding.saveAnswerDelayButton.setOnClickListener { saveAnswerDelay() }
+        binding.logoutButton.setOnClickListener { confirmLogoutCurrentNode() }
         binding.batterySettingsButton.setOnClickListener {
             runCatching {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
@@ -187,40 +193,119 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selected = RainNodes.all.getOrNull(position) ?: return
                 if (selected.key == secureStore.selectedNodeKey) return
-                val wasRunning = ClassroomService.isEnabled(this@MainActivity)
-                if (wasRunning) {
-                    startService(
-                        Intent(this@MainActivity, ClassroomService::class.java)
-                            .setAction(ClassroomService.ACTION_STOP),
-                    )
+                switchNode(selected)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
+    private fun switchNode(node: RainNode) {
+        val wasRunning = ClassroomService.isEnabled(this)
+        if (wasRunning) {
+            startService(Intent(this, ClassroomService::class.java).setAction(ClassroomService.ACTION_STOP))
+        }
+        nodeValidationGeneration += 1
+        secureStore.selectedNodeKey = node.key
+        refreshAccount()
+
+        val sessionId = secureStore.sessionId
+        if (sessionId.isBlank()) {
+            val detail = "已切换到${node.displayName}，请先完成扫码登录"
+            StatusBus.publish(this, WorkPhase.NEED_LOGIN, detail)
+            renderStatus(StatusBus.read(this))
+            Toast.makeText(
+                this,
+                if (wasRunning) "$detail；后台服务已停止" else detail,
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        validateNodeSession(node, sessionId, wasRunning)
+    }
+
+    private fun validateNodeSession(node: RainNode, sessionId: String, wasRunning: Boolean) {
+        val validationGeneration = ++nodeValidationGeneration
+        binding.nodeSpinner.isEnabled = false
+        StatusBus.publish(this, WorkPhase.VALIDATING_LOGIN, "正在校验${node.displayName}已保存的登录状态")
+        renderStatus(StatusBus.read(this))
+        lifecycleScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    RainClassroomApi(sessionId, node.baseUrl).validateSession()
                 }
-                secureStore.selectedNodeKey = selected.key
+            }
+            if (validationGeneration != nodeValidationGeneration || secureStore.selectedNodeKey != node.key) {
+                return@launch
+            }
+            binding.nodeSpinner.isEnabled = true
+            result.onSuccess { user ->
+                secureStore.userName = user.name
                 refreshAccount()
-                val detail = when {
-                    secureStore.sessionId.isBlank() -> "已切换到${selected.displayName}，请先完成扫码登录"
-                    secureStore.effectiveApiKey.isBlank() -> "已切换到${selected.displayName}，请配置 DeepSeek API Key"
-                    else -> "已切换到${selected.displayName}，登录态已就绪"
-                }
-                val phase = when {
-                    secureStore.sessionId.isBlank() -> WorkPhase.NEED_LOGIN
-                    secureStore.effectiveApiKey.isBlank() -> WorkPhase.NEED_API
-                    else -> WorkPhase.READY
+                val needsApi = secureStore.effectiveApiKey.isBlank()
+                val detail = if (needsApi) {
+                    "${node.displayName}登录有效，请配置 DeepSeek API Key"
+                } else {
+                    "${node.displayName}登录有效，可以开始工作"
                 }
                 StatusBus.publish(
                     this@MainActivity,
-                    phase,
+                    if (needsApi) WorkPhase.NEED_API else WorkPhase.READY,
                     detail,
                 )
                 renderStatus(StatusBus.read(this@MainActivity))
                 Toast.makeText(
                     this@MainActivity,
-                    if (wasRunning) "$detail；后台服务已停止" else detail,
+                    if (wasRunning) "$detail；原后台服务已停止" else detail,
                     Toast.LENGTH_LONG,
                 ).show()
+            }.onFailure { error ->
+                val expired = error is SessionExpiredException
+                if (expired) {
+                    secureStore.clearLogin(node.key)
+                    refreshAccount()
+                }
+                val detail = if (expired) {
+                    "${node.displayName}登录已失效，请重新扫码"
+                } else {
+                    "暂时无法校验${node.displayName}登录状态，已保留本机登录信息：${error.message}"
+                }
+                StatusBus.publish(
+                    this@MainActivity,
+                    if (expired) WorkPhase.NEED_LOGIN else WorkPhase.NETWORK_ERROR,
+                    detail,
+                )
+                renderStatus(StatusBus.read(this@MainActivity))
+                Toast.makeText(this@MainActivity, detail, Toast.LENGTH_LONG).show()
             }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+    }
+
+    private fun confirmLogoutCurrentNode() {
+        val node = secureStore.currentNode
+        if (secureStore.sessionId.isBlank()) {
+            Toast.makeText(this, "${node.displayName}当前没有已保存账号", Toast.LENGTH_SHORT).show()
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("退出当前节点账号")
+            .setMessage("将清除${node.displayName}保存在本机的登录状态，不影响其他节点。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("退出") { _, _ -> logoutCurrentNode(node) }
+            .show()
+    }
+
+    private fun logoutCurrentNode(node: RainNode) {
+        nodeValidationGeneration += 1
+        binding.nodeSpinner.isEnabled = true
+        if (ClassroomService.isEnabled(this)) {
+            startService(Intent(this, ClassroomService::class.java).setAction(ClassroomService.ACTION_STOP))
+        }
+        secureStore.clearLogin(node.key)
+        refreshAccount()
+        StatusBus.publish(this, WorkPhase.NEED_LOGIN, "已退出${node.displayName}账号，请重新扫码登录")
+        renderStatus(StatusBus.read(this))
+        Toast.makeText(this, "已清除${node.displayName}登录状态", Toast.LENGTH_SHORT).show()
     }
 
     private fun saveAnswerDelay() {
@@ -272,6 +357,7 @@ class MainActivity : AppCompatActivity() {
         val node = secureStore.currentNode
         binding.nodeText.text = "节点：${node.displayName}（${node.host}）"
         binding.loginButton.text = if (sessionId.isBlank()) "限时扫码登录" else "重新扫码登录"
+        binding.logoutButton.isEnabled = sessionId.isNotBlank()
         binding.accountText.text = if (sessionId.isBlank()) {
             "账号：未登录"
         } else {
@@ -312,6 +398,7 @@ class MainActivity : AppCompatActivity() {
                 -> ContextCompat.getColor(this, R.color.success)
                 WorkPhase.NEED_LOGIN,
                 WorkPhase.NEED_API,
+                WorkPhase.VALIDATING_LOGIN,
                 -> Color.parseColor("#B86B00")
                 WorkPhase.NETWORK_ERROR,
                 WorkPhase.SESSION_EXPIRED,
